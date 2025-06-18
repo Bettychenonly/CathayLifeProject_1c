@@ -48,7 +48,7 @@ class SequencePreprocessor:
 # 載入包含 encoder、scaler、transform 方法的完整前處理器
 preprocessor = joblib.load("sequence_preprocessor.pkl")
 # ➕ 載入 encoder 與 scaler
-    log.append("✅ 前處理器載入成功")
+        log.append("✅ 前處理器載入成功")
     return model, preprocessor, log
 
 # ========== 前處理函式 ==========
@@ -80,6 +80,11 @@ def preprocess_and_predict(df, model, preprocessor):
     df_result["o2o_conversion_prob"] = y_pred_o2o
     return df_result
 
+# ========== 欄位檢查函式 ==========
+def validate_columns(df: pd.DataFrame, required_columns: list[str]) -> list[str]:
+    missing = [col for col in required_columns if col not in df.columns]
+    return missing
+
 # ========== 步驟 1: 上傳資料 ==========
 st.markdown("### 步驟 1: 上傳資料")
 uploaded_file = st.file_uploader("請上傳用戶行為資料 (CSV 檔)", type=["csv"])
@@ -87,7 +92,12 @@ uploaded_file = st.file_uploader("請上傳用戶行為資料 (CSV 檔)", type=[
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     st.session_state.raw_uploaded_data = df
-    st.success(f"✅ 成功讀取 {len(df)} 筆資料")
+        required_columns = ["user_pseudo_id", "event_time", "action", "action_group", "source", "medium", "platform", "staytime", "has_shared", "revisit_count"]
+    missing_cols = validate_columns(df, required_columns)
+    if missing_cols:
+        st.error(f"❌ 缺少必要欄位：{', '.join(missing_cols)}")
+        st.stop()
+    st.success(f"✅ 成功讀取 {len(df)} 筆資料，欄位完整")
     with st.expander("📊 資料預覽", expanded=False):
         st.dataframe(df.head(10), use_container_width=True)
 else:
@@ -183,4 +193,5 @@ custom_filename = st.text_input(
 if st.button("確認條件並準備下載"):
     filename = f"{custom_filename}.csv"
     st.download_button("📥 下載結果 CSV", filtered_df.to_csv(index=False), file_name=filename, mime="text/csv")
+
 
