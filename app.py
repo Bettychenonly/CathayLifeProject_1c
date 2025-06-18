@@ -323,39 +323,67 @@ def preprocess_and_predict(df, model, preprocessor):
         
         # 處理序列預測結果 - 取最後一個時間步或平均
         processed_pred = []
-        for pred in y_pred:
+        for i, pred in enumerate(y_pred):
+            st.info(f"處理預測輸出 {i}: 形狀 {pred.shape}")
+            
             if len(pred.shape) == 3:  # (batch, time, features)
                 # 取最後一個時間步
                 processed_pred.append(pred[:, -1, :])
-            elif len(pred.shape) == 2:  # (batch, features)
-                processed_pred.append(pred)
+                st.info(f"  3D 輸出，取最後時間步: {pred[:, -1, :].shape}")
+            elif len(pred.shape) == 2:  # (batch, features) 或 (batch, time)
+                if pred.shape[1] == seq_len:  # 可能是 (batch, time) 格式
+                    # 取最後一個時間步
+                    processed_pred.append(pred[:, -1:])
+                    st.info(f"  2D 時間序列，取最後時間步: {pred[:, -1:].shape}")
+                else:  # 正常的 (batch, features)
+                    processed_pred.append(pred)
+                    st.info(f"  2D 特徵輸出: {pred.shape}")
             else:  # (batch,)
                 processed_pred.append(pred.reshape(-1, 1))
+                st.info(f"  1D 輸出，重塑為: {pred.reshape(-1, 1).shape}")
         
         y_pred = processed_pred
+        st.info(f"處理後的預測結果數量: {len(y_pred)}")
+        for i, pred in enumerate(y_pred):
+            st.info(f"  結果 {i}: {pred.shape}")
         
         # 展開預測結果以匹配原始資料
         original_length = len(df)
+        st.info(f"原始資料長度: {original_length}")
         
         if len(y_pred) >= 1:
             # 行為預測
             pred_0 = y_pred[0]
+            st.info(f"主要預測形狀: {pred_0.shape}")
+            
             if len(pred_0.shape) > 1 and pred_0.shape[1] > 1:
+                # 多類別分類
                 y_pred_action = np.argmax(pred_0, axis=1)
                 y_pred_action_conf = np.max(pred_0, axis=1)
+                st.info(f"多類別預測: {len(y_pred_action)} 個預測值")
             else:
+                # 單一值或二元分類
                 y_pred_action = pred_0.flatten()
-                y_pred_action_conf = np.ones_like(y_pred_action) * 0.5
+                if np.max(y_pred_action) <= 1.0 and np.min(y_pred_action) >= 0.0:
+                    # 看起來像機率值，轉換為類別
+                    y_pred_action = (y_pred_action > 0.5).astype(int)
+                    y_pred_action_conf = np.abs(pred_0.flatten() - 0.5) * 2  # 轉換為信心分數
+                else:
+                    # 直接使用預測值
+                    y_pred_action_conf = np.ones_like(y_pred_action) * 0.7
+                st.info(f"單值預測: {len(y_pred_action)} 個預測值")
             
             # 重複預測結果以匹配原始資料長度
             if len(y_pred_action) < original_length:
-                # 重複最後一個值
-                n_repeats = original_length // len(y_pred_action) + 1
+                # 計算需要重複的次數
+                n_repeats = (original_length + len(y_pred_action) - 1) // len(y_pred_action)
                 y_pred_action = np.tile(y_pred_action, n_repeats)[:original_length]
                 y_pred_action_conf = np.tile(y_pred_action_conf, n_repeats)[:original_length]
+                st.info(f"重複預測結果以匹配原始長度: {len(y_pred_action)}")
             elif len(y_pred_action) > original_length:
                 y_pred_action = y_pred_action[:original_length]
                 y_pred_action_conf = y_pred_action_conf[:original_length]
+                st.info(f"截斷預測結果以匹配原始長度: {len(y_pred_action)}")
         else:
             raise ValueError("模型預測結果格式不正確")
         
@@ -583,6 +611,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
