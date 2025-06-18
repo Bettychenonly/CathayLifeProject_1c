@@ -51,8 +51,20 @@ preprocessor = joblib.load("sequence_preprocessor.pkl")
     log.append("✅ 前處理器載入成功")
     return model, preprocessor, log
 
+# ========== 前處理函式 ==========
+def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df = df[~(df['action'].isna() & (df['action_group'] == '其他'))]
+    df['action'].fillna(df['action_group'], inplace=True)
+    df['source'] = df['source'].fillna('None')
+    df['medium'] = df['medium'].fillna('None')
+    df['staytime'] = df['staytime'].fillna(0)
+    df['has_shared'] = df['has_shared'].fillna(False)
+    return df
+
 # ========== 預測函式 ==========
 def preprocess_and_predict(df, model, preprocessor):
+    df = clean_dataframe(df)
     X = preprocessor.transform(df)
     y_pred = model.predict(X)
     y_pred_action = np.argmax(y_pred[0], axis=1)
@@ -171,3 +183,4 @@ custom_filename = st.text_input(
 if st.button("確認條件並準備下載"):
     filename = f"{custom_filename}.csv"
     st.download_button("📥 下載結果 CSV", filtered_df.to_csv(index=False), file_name=filename, mime="text/csv")
+
