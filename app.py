@@ -308,17 +308,77 @@ def preprocess_and_predict(df, model, preprocessor):
         st.info("正在進行模型預測...")
         y_pred = model.predict(model_inputs)
         
-        # 檢查預測結果的格式
+        # === 重要：處理字典格式的預測結果 ===
         st.info(f"預測輸出類型: {type(y_pred)}")
-        if isinstance(y_pred, (list, tuple)):
+        
+        if isinstance(y_pred, dict):
+            st.info(f"預測輸出鍵值: {list(y_pred.keys())}")
+            for key, value in y_pred.items():
+                st.info(f"輸出 {key} 形狀: {value.shape}")
+            
+            # 將字典轉換為列表格式以便後續處理
+            pred_list = []
+            
+            # 常見的輸出鍵名
+            possible_main_keys = ['next_action_group', 'action_group_pred', 'action_pred', 'main_output']
+            possible_online_keys = ['online_conversion', 'online_prob', 'conversion_online']
+            possible_o2o_keys = ['o2o_conversion', 'o2o_prob', 'conversion_o2o']
+            
+            # 查找主要預測結果
+            main_pred = None
+            for key in possible_main_keys:
+                if key in y_pred:
+                    main_pred = y_pred[key]
+                    st.info(f"找到主要預測: {key}")
+                    break
+            
+            if main_pred is None:
+                # 如果沒找到預期的鍵，使用第一個
+                main_key = list(y_pred.keys())[0]
+                main_pred = y_pred[main_key]
+                st.info(f"使用第一個輸出作為主要預測: {main_key}")
+            
+            pred_list.append(main_pred)
+            
+            # 查找線上轉換預測
+            online_pred = None
+            for key in possible_online_keys:
+                if key in y_pred:
+                    online_pred = y_pred[key]
+                    st.info(f"找到線上轉換預測: {key}")
+                    break
+            
+            if online_pred is not None:
+                pred_list.append(online_pred)
+            
+            # 查找 O2O 轉換預測
+            o2o_pred = None
+            for key in possible_o2o_keys:
+                if key in y_pred:
+                    o2o_pred = y_pred[key]
+                    st.info(f"找到 O2O 轉換預測: {key}")
+                    break
+            
+            if o2o_pred is not None:
+                pred_list.append(o2o_pred)
+            
+            # 如果沒找到轉換預測，添加剩餘的輸出
+            if online_pred is None and o2o_pred is None:
+                used_keys = {list(y_pred.keys())[0]}  # 已使用的主要預測鍵
+                for key, value in y_pred.items():
+                    if key not in used_keys:
+                        pred_list.append(value)
+                        st.info(f"添加額外輸出: {key}")
+            
+            y_pred = pred_list
+            st.info(f"轉換後的預測結果數量: {len(y_pred)}")
+            
+        elif isinstance(y_pred, (list, tuple)):
             st.info(f"預測輸出數量: {len(y_pred)}")
             for i, pred in enumerate(y_pred):
                 st.info(f"輸出 {i} 形狀: {pred.shape}")
         else:
             st.info(f"預測輸出形狀: {y_pred.shape}")
-        
-        # 處理預測結果
-        if not isinstance(y_pred, (list, tuple)):
             y_pred = [y_pred]
         
         # 處理序列預測結果 - 取最後一個時間步或平均
@@ -367,247 +427,4 @@ def preprocess_and_predict(df, model, preprocessor):
                 if np.max(y_pred_action) <= 1.0 and np.min(y_pred_action) >= 0.0:
                     # 看起來像機率值，轉換為類別
                     y_pred_action = (y_pred_action > 0.5).astype(int)
-                    y_pred_action_conf = np.abs(pred_0.flatten() - 0.5) * 2  # 轉換為信心分數
-                else:
-                    # 直接使用預測值
-                    y_pred_action_conf = np.ones_like(y_pred_action) * 0.7
-                st.info(f"單值預測: {len(y_pred_action)} 個預測值")
-            
-            # 重複預測結果以匹配原始資料長度
-            if len(y_pred_action) < original_length:
-                # 計算需要重複的次數
-                n_repeats = (original_length + len(y_pred_action) - 1) // len(y_pred_action)
-                y_pred_action = np.tile(y_pred_action, n_repeats)[:original_length]
-                y_pred_action_conf = np.tile(y_pred_action_conf, n_repeats)[:original_length]
-                st.info(f"重複預測結果以匹配原始長度: {len(y_pred_action)}")
-            elif len(y_pred_action) > original_length:
-                y_pred_action = y_pred_action[:original_length]
-                y_pred_action_conf = y_pred_action_conf[:original_length]
-                st.info(f"截斷預測結果以匹配原始長度: {len(y_pred_action)}")
-        else:
-            raise ValueError("模型預測結果格式不正確")
-        
-        # 處理轉換機率
-        if len(y_pred) >= 2:
-            y_pred_online = y_pred[1].flatten()
-            if len(y_pred_online) < original_length:
-                n_repeats = original_length // len(y_pred_online) + 1
-                y_pred_online = np.tile(y_pred_online, n_repeats)[:original_length]
-            elif len(y_pred_online) > original_length:
-                y_pred_online = y_pred_online[:original_length]
-        else:
-            y_pred_online = np.random.rand(original_length) * 0.3
-            
-        if len(y_pred) >= 3:
-            y_pred_o2o = y_pred[2].flatten()
-            if len(y_pred_o2o) < original_length:
-                n_repeats = original_length // len(y_pred_o2o) + 1
-                y_pred_o2o = np.tile(y_pred_o2o, n_repeats)[:original_length]
-            elif len(y_pred_o2o) > original_length:
-                y_pred_o2o = y_pred_o2o[:original_length]
-        else:
-            y_pred_o2o = np.random.rand(original_length) * 0.3
-        
-        # 解碼預測標籤
-        if hasattr(preprocessor, 'label_encoder_action_group'):
-            try:
-                label_encoder = preprocessor.label_encoder_action_group
-                pred_action_labels = label_encoder.inverse_transform(y_pred_action.astype(int))
-            except:
-                pred_action_labels = [f"Action_{i}" for i in y_pred_action]
-        else:
-            # 創建標籤映射
-            unique_actions = df['action_group'].unique()
-            action_map = {i: action for i, action in enumerate(unique_actions)}
-            pred_action_labels = [action_map.get(int(i) % len(unique_actions), f"Action_{i}") for i in y_pred_action]
-        
-        # 建立結果資料框
-        df_result = df.copy()
-        df_result["Top1_next_action_group"] = pred_action_labels
-        df_result["Top1_confidence"] = y_pred_action_conf
-        df_result["online_conversion_prob"] = y_pred_online
-        df_result["o2o_conversion_prob"] = y_pred_o2o
-        
-        st.success("✅ 預測完成")
-        return df_result
-        
-    except Exception as e:
-        st.error(f"預測過程發生錯誤: {str(e)}")
-        st.error(f"錯誤詳情: {type(e).__name__}")
-        
-        # 提供除錯信息
-        with st.expander("🔍 除錯信息", expanded=False):
-            st.write("資料形狀:", df.shape)
-            st.write("資料欄位:", list(df.columns))
-            st.write("預處理器類型:", type(preprocessor).__name__)
-            if hasattr(preprocessor, 'cat_features'):
-                st.write("類別特徵:", preprocessor.cat_features)
-            if hasattr(preprocessor, 'num_features'):
-                st.write("數值特徵:", preprocessor.num_features)
-            
-            # 顯示資料樣本
-            st.write("資料樣本:")
-            st.dataframe(df.head(3))
-        
-        return None
-
-# ========== 欄位檢查函式 ==========
-def validate_columns(df: pd.DataFrame, required_columns: list[str]) -> list[str]:
-    """檢查必要欄位是否存在"""
-    missing = [col for col in required_columns if col not in df.columns]
-    return missing
-
-# ========== 主要應用程式 ==========
-def main():
-    st.title("🏢 國泰人壽 - 用戶行為預測工具")
-    st.markdown("---")
-    
-    # ========== 步驟 1: 上傳資料 ==========
-    st.markdown("### 步驟 1: 上傳資料")
-    uploaded_file = st.file_uploader("請上傳用戶行為資料 (CSV 檔)", type=["csv"])
-
-    if uploaded_file:
-        try:
-            df = pd.read_csv(uploaded_file)
-            st.session_state.raw_uploaded_data = df
-            
-            required_columns = [
-                "user_pseudo_id", "event_time", "action", "action_group", 
-                "source", "medium", "platform", "staytime", "has_shared", "revisit_count"
-            ]
-            missing_cols = validate_columns(df, required_columns)
-            
-            if missing_cols:
-                st.error(f"❌ 缺少必要欄位：{', '.join(missing_cols)}")
-                st.stop()
-                
-            st.success(f"✅ 成功讀取 {len(df)} 筆資料，欄位完整")
-            
-            with st.expander("📊 資料預覽", expanded=False):
-                st.dataframe(df.head(10), use_container_width=True)
-                
-        except Exception as e:
-            st.error(f"❌ 讀取檔案時發生錯誤: {str(e)}")
-            st.stop()
-    else:
-        st.info("請先上傳 CSV 檔案")
-        st.stop()
-
-    # ========== 步驟 2: 模型與資料載入 ==========
-    st.markdown("### 步驟 2: 載入模型與前處理")
-    
-    with st.spinner("正在載入模型..."):
-        model, preprocessor, logs = load_model_and_preprocessor()
-    
-    if model is None or preprocessor is None:
-        st.error("❌ 模型或前處理器載入失敗")
-        with st.expander("🧾 載入記錄", expanded=True):
-            for line in logs:
-                st.markdown(f"- {line}")
-        st.stop()
-    
-    st.success("✅ 模型與前處理器載入成功")
-    with st.expander("🧾 載入記錄", expanded=False):
-        for line in logs:
-            st.markdown(f"- {line}")
-
-    # ========== 步驟 3: 開始預測 ==========
-    st.markdown("### 步驟 3: 開始預測")
-    
-    if st.button("🔮 開始預測"):
-        with st.spinner("預測中..."):
-            df_pred = preprocess_and_predict(st.session_state.raw_uploaded_data, model, preprocessor)
-            
-            if df_pred is not None:
-                st.session_state.prediction_data = df_pred
-                st.success("✅ 預測完成！")
-            else:
-                st.error("❌ 預測失敗")
-                st.stop()
-    else:
-        if "prediction_data" not in st.session_state or st.session_state.prediction_data is None:
-            st.info("請點擊「開始預測」按鈕")
-            st.stop()
-
-    # ========== 步驟 4: 預測結果預覽 ==========
-    st.markdown("### 步驟 4: 預測結果預覽")
-    df_pred = st.session_state.prediction_data
-    st.dataframe(df_pred.head(10), use_container_width=True)
-
-    # ========== 步驟 5: 圖表統計 ==========
-    st.markdown("### 步驟 5: 統計圖表")
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 行為分佈", "📈 信心分數", "🔍 轉換分析", "🎯 策略分佈"])
-
-    with tab1:
-        chart_df = df_pred["Top1_next_action_group"].value_counts().reset_index()
-        chart_df.columns = ["action_group", "count"]
-        fig1 = px.bar(chart_df, x="action_group", y="count", title="Top1 預測行為分佈")
-        fig1.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(fig1, use_container_width=True)
-
-    with tab2:
-        fig2 = px.histogram(
-            df_pred,
-            x="Top1_confidence",
-            nbins=20,
-            title="Top1 預測信心分數分佈（人數）",
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-
-    with tab3:
-        fig3 = px.histogram(
-            df_pred, x="online_conversion_prob", nbins=20, title="網投轉換機率分佈"
-        )
-        fig4 = px.histogram(
-            df_pred, x="o2o_conversion_prob", nbins=20, title="O2O 預約轉換機率分佈"
-        )
-        st.plotly_chart(fig3, use_container_width=True)
-        st.plotly_chart(fig4, use_container_width=True)
-
-    with tab4:
-        st.info("可日後擴充策略推薦邏輯 (依 Top1 行為給定建議)")
-
-    # ========== 步驟 6: 確認條件並下載 ==========
-    st.markdown("### 步驟 6: 確認條件並下載")
-
-    filtered_df = st.session_state.get("prediction_data", pd.DataFrame()).copy()
-    st.markdown(f"**目前符合條件的用戶數量**：{len(filtered_df)} 人")
-
-    if len(filtered_df) == 0:
-        st.warning("⚠️ 目前條件下沒有符合的用戶，請調整條件後再試")
-        st.stop()
-
-    # 條件選擇
-    available_actions = filtered_df["Top1_next_action_group"].unique().tolist()
-    selected_actions = st.multiselect("篩選預測行為", options=available_actions, default=available_actions)
-    conf_threshold = st.slider("信心分數下限", 0.0, 1.0, 0.3, step=0.05)
-
-    # 應用篩選條件
-    filtered_df = filtered_df[
-        (filtered_df["Top1_next_action_group"].isin(selected_actions)) &
-        (filtered_df["Top1_confidence"] >= conf_threshold)
-    ]
-    st.session_state.filtered_prediction_data = filtered_df
-    st.markdown(f"**篩選後用戶數量**：{len(filtered_df)} 人")
-
-    # 下載區塊
-    today_str = datetime.now().strftime("%Y%m%d")
-    default_filename = f"prediction_result_{len(filtered_df)}users_{today_str}"
-    custom_filename = st.text_input(
-        "自訂檔名（選填，系統會自動加上 .csv）",
-        value=default_filename,
-        placeholder="ex: 旅平險_Top3_信心0.3"
-    )
-
-    if st.button("📥 下載結果"):
-        filename = f"{custom_filename}.csv"
-        csv_data = filtered_df.to_csv(index=False)
-        st.download_button(
-            label="📥 點擊下載 CSV",
-            data=csv_data,
-            file_name=filename,
-            mime="text/csv"
-        )
-
-if __name__ == "__main__":
-    main()
+                    y_pre
