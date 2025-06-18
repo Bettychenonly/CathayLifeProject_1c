@@ -47,8 +47,7 @@ class SequencePreprocessor:
 # ✅ 初始化 preprocessor（從前面 .pkl 拆出邏輯）
 # 載入包含 encoder、scaler、transform 方法的完整前處理器
 preprocessor = joblib.load("sequence_preprocessor.pkl")
-# ➕ 載入 encoder 與 scaler
-        log.append("✅ 前處理器載入成功")
+log.append("✅ 前處理器載入成功")
     return model, preprocessor, log
 
 # ========== 前處理函式 ==========
