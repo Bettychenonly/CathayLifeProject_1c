@@ -29,21 +29,21 @@ def load_model_and_preprocessor():
         log.append("✅ 模型載入成功")
         
 
-        class SequencePreprocessor:
-        def __init__(self, cat_features, num_features, seq_len=10):
-        self.cat_features = cat_features
+                class SequencePreprocessor:
+                        def __init__(self, cat_features, num_features, seq_len=10):
+                self.cat_features = cat_features
         self.num_features = num_features
         self.seq_len = seq_len
         self.ordinal_encoder = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
         self.scaler = StandardScaler()
         self.num_categories = {}
 
-                    def transform(self, df):
-        df[self.cat_features] = self.ordinal_encoder.transform(df[self.cat_features].astype(str)) + 2
-                df['staytime'] = np.log1p(df['staytime'].fillna(0))
-                df['revisit_count'] = np.log1p(df['revisit_count'])
-                df[['staytime', 'revisit_count']] = self.scaler.transform(df[['staytime', 'revisit_count']])
-                        return df
+                                def transform(self, df):
+                df[self.cat_features] = self.ordinal_encoder.transform(df[self.cat_features].astype(str)) + 2
+                                df['staytime'] = np.log1p(df['staytime'].fillna(0))
+                                df['revisit_count'] = np.log1p(df['revisit_count'])
+                                df[['staytime', 'revisit_count']] = self.scaler.transform(df[['staytime', 'revisit_count']])
+                                        return df
 
     # ✅ 初始化 preprocessor（從前面 .pkl 拆出邏輯）
     # 載入包含 encoder、scaler、transform 方法的完整前處理器
@@ -193,6 +193,7 @@ custom_filename = st.text_input(
 if st.button("確認條件並準備下載"):
     filename = f"{custom_filename}.csv"
     st.download_button("📥 下載結果 CSV", filtered_df.to_csv(index=False), file_name=filename, mime="text/csv")
+
 
 
 
