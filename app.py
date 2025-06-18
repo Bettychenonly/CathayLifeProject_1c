@@ -24,7 +24,7 @@ if "filtered_prediction_data" not in st.session_state:
 @st.cache_resource
 def load_model_and_preprocessor():
     log = []
-    model = load_model("best_model_weights_0615.h5")
+    model = load_model("model_0615")
     log.append("✅ 模型載入成功")
     preprocessor = joblib.load("sequence_preprocessor.pkl")
     log.append("✅ 前處理器載入成功")
