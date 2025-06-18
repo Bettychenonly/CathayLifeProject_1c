@@ -77,6 +77,21 @@ def load_model_and_preprocessor():
             # 轉換類別特徵
             df[self.cat_features] = self.ordinal_encoder.transform(df[self.cat_features].astype(str)) + 2
             
+            # 根據模型嵌入層限制調整類別特徵範圍
+            embedding_limits = {
+                'platform': 7,     # platform 嵌入層大小
+                'source': 15,      # 估計值
+                'medium': 15,      # 估計值
+                'action_group': 20, # 估計值
+                'action': 25       # 估計值（如果有的話）
+            }
+            
+            for col in self.cat_features:
+                if col in df.columns and col in embedding_limits:
+                    limit = embedding_limits[col]
+                    # 將值限制在 [0, limit-1] 範圍內
+                    df[col] = df[col].clip(0, limit-1)
+            
             # 轉換數值特徵
             df['staytime'] = np.log1p(df['staytime'].fillna(0))
             df['revisit_count'] = np.log1p(df['revisit_count'])
@@ -191,6 +206,33 @@ def preprocess_and_predict(df, model, preprocessor):
             X['user_pseudo_id'] = 'default_user'
             user_groups = X.groupby('user_pseudo_id')
         
+        # 檢查並修正類別特徵的範圍
+        # 模型的嵌入層大小限制（根據錯誤訊息推斷）
+        embedding_limits = {
+            'platform': 7,    # platform 嵌入層大小為 7 (索引 0-6)
+            'source': 10,     # 估計值，可能需要調整
+            'medium': 10,     # 估計值，可能需要調整  
+            'action_group': 15 # 估計值，可能需要調整
+        }
+        
+        st.info("檢查並修正類別特徵範圍...")
+        for col in cat_features:
+            if col in X.columns:
+                max_val = X[col].max()
+                min_val = X[col].min()
+                limit = embedding_limits.get(col, max_val + 1)
+                
+                st.info(f"{col}: 範圍 {min_val}-{max_val}, 嵌入層限制 0-{limit-1}")
+                
+                if max_val >= limit:
+                    st.warning(f"⚠️ {col} 超出範圍！將 {max_val} 調整為 {limit-1}")
+                    # 將超出範圍的值映射到有效範圍內
+                    X[col] = X[col].clip(0, limit-1)
+                
+                if min_val < 0:
+                    st.warning(f"⚠️ {col} 有負值！將調整為 0")
+                    X[col] = X[col].clip(0, limit-1)
+        
         # 為每個用戶創建序列
         sequences = {
             'action_group': [],
@@ -222,6 +264,10 @@ def preprocess_and_predict(df, model, preprocessor):
                                           constant_values=last_val)
                     elif len(seq_values) > seq_len:
                         seq_values = seq_values[:seq_len]
+                    
+                    # 再次確保範圍正確
+                    limit = embedding_limits.get(cat_col, 100)
+                    seq_values = np.clip(seq_values, 0, limit-1)
                     
                     sequences[cat_col].append(seq_values.astype(np.int32))
                 
