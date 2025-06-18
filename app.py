@@ -427,4 +427,8 @@ def preprocess_and_predict(df, model, preprocessor):
                 if np.max(y_pred_action) <= 1.0 and np.min(y_pred_action) >= 0.0:
                     # 看起來像機率值，轉換為類別
                     y_pred_action = (y_pred_action > 0.5).astype(int)
-                    y_pre
+                    y_pred_action_conf = np.abs(pred_0.flatten() - 0.5) * 2  # 轉換為信心分數
+                else:
+                    # 直接使用預測值
+                    y_pred_action_conf = np.ones_like(y_pred_action) * 0.7
+                st.info(f"單值預測: {len(y_pred_action)} 個預測值")
