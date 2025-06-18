@@ -69,7 +69,7 @@ def load_model_and_preprocessor():
             df[self.cat_features] = self.ordinal_encoder.transform(df[self.cat_features].astype(str)) + 2
             
             embedding_limits = {
-                'platform': 7, 'source': 15, 'medium': 15, 'action_group': 20, 'action': 25
+                'platform': 10, 'source': 1500, 'medium': 350, 'action_group': 100, 'action': 16000
             }
             
             for col in self.cat_features:
@@ -174,7 +174,7 @@ def preprocess_and_predict(df, model, preprocessor):
             user_groups = X.groupby('user_pseudo_id')
         
         embedding_limits = {
-            'platform': 10, 'source': 1500, 'medium': 400, 'action_group': 100
+            'platform': 7, 'source': 10, 'medium': 10, 'action_group': 15
         }
         
         st.info("檢查並修正類別特徵範圍...")
@@ -340,17 +340,42 @@ def preprocess_and_predict(df, model, preprocessor):
         if len(y_pred) >= 1:
             pred_0 = y_pred[0]
             st.info(f"主要預測形狀: {pred_0.shape}")
+            st.info(f"主要預測值範圍: {pred_0.min():.4f} - {pred_0.max():.4f}")
             
             if len(pred_0.shape) > 1 and pred_0.shape[1] > 1:
+                # 多類別分類
+                st.info(f"檢測到多類別分類，類別數量: {pred_0.shape[1]}")
+                
+                # 顯示每個類別的平均機率
+                avg_probs = np.mean(pred_0, axis=0)
+                st.info("各類別平均機率:")
+                for i, prob in enumerate(avg_probs):
+                    st.info(f"  類別 {i}: {prob:.4f}")
+                
                 y_pred_action = np.argmax(pred_0, axis=1)
                 y_pred_action_conf = np.max(pred_0, axis=1)
                 st.info(f"多類別預測: {len(y_pred_action)} 個預測值")
+                
+                # 顯示預測類別分佈
+                from collections import Counter
+                pred_dist = Counter(y_pred_action)
+                st.info("預測類別分佈:")
+                for cls, count in pred_dist.most_common():
+                    st.info(f"  類別 {cls}: {count} 次 ({count/len(y_pred_action)*100:.1f}%)")
+                    
             else:
+                # 單一值或二元分類
                 y_pred_action = pred_0.flatten()
+                st.info(f"單值預測範圍: {y_pred_action.min():.4f} - {y_pred_action.max():.4f}")
+                
                 if np.max(y_pred_action) <= 1.0 and np.min(y_pred_action) >= 0.0:
+                    # 看起來像機率值，轉換為類別
+                    st.info("檢測到機率值，轉換為二元分類")
                     y_pred_action = (y_pred_action > 0.5).astype(int)
                     y_pred_action_conf = np.abs(pred_0.flatten() - 0.5) * 2
                 else:
+                    # 直接使用預測值
+                    st.info("直接使用預測值作為類別索引")
                     y_pred_action_conf = np.ones_like(y_pred_action) * 0.7
                 st.info(f"單值預測: {len(y_pred_action)} 個預測值")
             
