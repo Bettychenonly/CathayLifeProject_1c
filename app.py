@@ -174,7 +174,7 @@ def preprocess_and_predict(df, model, preprocessor):
             user_groups = X.groupby('user_pseudo_id')
         
         embedding_limits = {
-            'platform': 7, 'source': 10, 'medium': 10, 'action_group': 15
+            'platform': 10, 'source': 1500, 'medium': 350, 'action_group': 80
         }
         
         st.info("檢查並修正類別特徵範圍...")
