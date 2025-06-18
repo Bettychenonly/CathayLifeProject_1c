@@ -1,8 +1,5 @@
-# app.py
-# 🚨 重要：st.set_page_config 必須是第一個 Streamlit 命令
+# app.py - 完整 UI 版本（含步驟導引與頁籤）
 import streamlit as st
-st.set_page_config(page_title="行為預測工具", layout="wide")
-
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -11,36 +8,38 @@ from tensorflow.keras.models import load_model
 import joblib
 import os
 
+st.set_page_config(page_title="國泰人壽 - 用戶行為預測工具", layout="centered", initial_sidebar_state="collapsed")
+
+# ========== 初始化 Session State ==========
+if "raw_uploaded_data" not in st.session_state:
+    st.session_state.raw_uploaded_data = None
+if "filtered_input_data" not in st.session_state:
+    st.session_state.filtered_input_data = None
+if "prediction_data" not in st.session_state:
+    st.session_state.prediction_data = None
+if "filtered_prediction_data" not in st.session_state:
+    st.session_state.filtered_prediction_data = None
+
 # ========== 模型與前處理載入 ==========
 @st.cache_resource
 def load_model_and_preprocessor():
     log = []
-    log.append("🔍 開始載入模型與前處理器...")
-
     model = load_model("best_model_weights_0615.h5")
     log.append("✅ 模型載入成功")
-
     preprocessor = joblib.load("sequence_preprocessor.pkl")
     log.append("✅ 前處理器載入成功")
-
     return model, preprocessor, log
 
-# ========== 資料前處理與預測 ==========
+# ========== 預測函式 ==========
 def preprocess_and_predict(df, model, preprocessor):
-    # 預處理：假設前處理器實作了 transform 方法
     X = preprocessor.transform(df)
-
-    # 模型推論
     y_pred = model.predict(X)
     y_pred_action = np.argmax(y_pred[0], axis=1)
     y_pred_online = y_pred[1].flatten()
     y_pred_o2o = y_pred[2].flatten()
     y_pred_action_conf = np.max(y_pred[0], axis=1)
-
-    # 還原編碼
     label_encoder = preprocessor.label_encoder_action_group
     pred_action_labels = label_encoder.inverse_transform(y_pred_action)
-
     df_result = df.copy()
     df_result["Top1_next_action_group"] = pred_action_labels
     df_result["Top1_confidence"] = y_pred_action_conf
@@ -48,75 +47,107 @@ def preprocess_and_predict(df, model, preprocessor):
     df_result["o2o_conversion_prob"] = y_pred_o2o
     return df_result
 
-# ========== 主應用邏輯 ==========
-st.title("🧠 用戶行為預測工具")
+# ========== 步驟 1: 上傳資料 ==========
+st.markdown("### 步驟 1: 上傳資料")
+uploaded_file = st.file_uploader("請上傳用戶行為資料 (CSV 檔)", type=["csv"])
 
-# 載入模型與前處理器
-with st.spinner("模型初始化中..."):
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.session_state.raw_uploaded_data = df
+    st.success(f"✅ 成功讀取 {len(df)} 筆資料")
+    with st.expander("📊 資料預覽", expanded=False):
+        st.dataframe(df.head(10), use_container_width=True)
+else:
+    st.stop()
+
+# ========== 步驟 2: 模型與資料載入 ==========
+st.markdown("### 步驟 2: 載入模型與前處理")
+with st.spinner("正在載入模型..."):
     model, preprocessor, logs = load_model_and_preprocessor()
-
-with st.expander("🔧 載入記錄", expanded=False):
+st.success("✅ 模型與前處理器載入成功")
+with st.expander("🧾 載入記錄", expanded=False):
     for line in logs:
         st.markdown(f"- {line}")
 
-# 上傳資料
-uploaded_file = st.file_uploader("請上傳用戶行為資料 CSV", type=["csv"])
-
-if uploaded_file:
-    df_input = pd.read_csv(uploaded_file)
-    st.success(f"✅ 成功載入 {len(df_input)} 筆資料")
-
-    # 預測
-    with st.spinner("進行預測中..."):
-        df_pred = preprocess_and_predict(df_input, model, preprocessor)
-        st.session_state["df_pred"] = df_pred
-
-    st.markdown("## 📊 預測結果預覽")
-    st.dataframe(df_pred.head(10), use_container_width=True)
-
-    # 統計圖表
-    st.markdown("## 📈 統計圖表")
-    tab1, tab2, tab3 = st.tabs(["Top1 行為分佈", "信心分數分佈", "轉換機率"])
-
-    with tab1:
-        fig1 = px.bar(
-            df_pred["Top1_next_action_group"].value_counts().reset_index(),
-            x="index", y="Top1_next_action_group",
-            labels={"index": "預測行為", "Top1_next_action_group": "人數"},
-            title="Top1 預測行為分佈"
-        )
-        fig1.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(fig1, use_container_width=True)
-
-    with tab2:
-        fig2 = px.histogram(
-            df_pred, x="Top1_confidence", nbins=20,
-            title="Top1 信心分數分佈"
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-
-    with tab3:
-        fig3 = px.histogram(df_pred, x="online_conversion_prob", nbins=20, title="網投轉換機率")
-        fig4 = px.histogram(df_pred, x="o2o_conversion_prob", nbins=20, title="O2O 預約轉換機率")
-        st.plotly_chart(fig3, use_container_width=True)
-        st.plotly_chart(fig4, use_container_width=True)
-
-    # 條件篩選與下載
-    st.markdown("## 📥 結果篩選與下載")
-    available_actions = df_pred["Top1_next_action_group"].unique().tolist()
-    selected_actions = st.multiselect("篩選預測行為", options=available_actions, default=available_actions)
-    conf_threshold = st.slider("信心分數下限", 0.0, 1.0, 0.3, step=0.05)
-
-    df_filtered = df_pred[
-        (df_pred["Top1_next_action_group"].isin(selected_actions)) &
-        (df_pred["Top1_confidence"] >= conf_threshold)
-    ]
-
-    st.markdown(f"符合條件的用戶：{len(df_filtered)} 筆")
-    st.dataframe(df_filtered.head(10), use_container_width=True)
-
-    today_str = datetime.today().strftime("%Y%m%d")
-    filename = st.text_input("輸出檔名", value=f"prediction_result_{today_str}.csv")
-    st.download_button("下載結果 CSV", df_filtered.to_csv(index=False), file_name=filename, mime="text/csv")
+# ========== 步驟 3: 開始預測 ==========
+st.markdown("### 步驟 3: 開始預測")
+if st.button("🔮 開始預測"):
+    with st.spinner("預測中..."):
+        df_pred = preprocess_and_predict(st.session_state.raw_uploaded_data, model, preprocessor)
+        st.session_state.prediction_data = df_pred
+    st.success("✅ 預測完成！")
 else:
-    st.info("請上傳行為資料以啟動預測流程")
+    st.stop()
+
+# ========== 步驟 4: 預測結果預覽 ==========
+st.markdown("### 步驟 4: 預測結果預覽")
+df_pred = st.session_state.prediction_data
+st.dataframe(df_pred.head(10), use_container_width=True)
+
+# ========== 步驟 5: 圖表統計 ==========
+st.markdown("### 步驟 5: 統計圖表")
+tab1, tab2, tab3, tab4 = st.tabs(["📊 行為分佈", "📈 信心分數", "🔍 轉換分析", "🎯 策略分佈"])
+
+with tab1:
+    chart_df = df_pred["Top1_next_action_group"].value_counts().reset_index()
+    chart_df.columns = ["action_group", "count"]
+    fig1 = px.bar(chart_df, x="action_group", y="count", title="Top1 預測行為分佈")
+    fig1.update_layout(xaxis_tickangle=-45)
+    st.plotly_chart(fig1, use_container_width=True)
+
+with tab2:
+    fig2 = px.histogram(
+        df_pred,
+        x="Top1_confidence",
+        nbins=20,
+        title="Top1 預測信心分數分佈（人數）",
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+with tab3:
+    fig3 = px.histogram(
+        df_pred, x="online_conversion_prob", nbins=20, title="網投轉換機率分佈"
+    )
+    fig4 = px.histogram(
+        df_pred, x="o2o_conversion_prob", nbins=20, title="O2O 預約轉換機率分佈"
+    )
+    st.plotly_chart(fig3, use_container_width=True)
+    st.plotly_chart(fig4, use_container_width=True)
+
+with tab4:
+    st.info("可日後擴充策略推薦邏輯 (依 Top1 行為給定建議)")
+
+# ========== 步驟 6: 確認條件並下載 ==========
+st.markdown("### 步驟 6: 確認條件並下載")
+
+filtered_df = st.session_state.get("prediction_data", pd.DataFrame()).copy()
+st.markdown(f"**目前符合條件的用戶數量**：{len(filtered_df)} 人")
+
+if len(filtered_df) == 0:
+    st.warning("⚠️ 目前條件下沒有符合的用戶，請調整條件後再試")
+    st.stop()
+
+# 條件選擇
+available_actions = filtered_df["Top1_next_action_group"].unique().tolist()
+selected_actions = st.multiselect("篩選預測行為", options=available_actions, default=available_actions)
+conf_threshold = st.slider("信心分數下限", 0.0, 1.0, 0.3, step=0.05)
+
+filtered_df = filtered_df[
+    (filtered_df["Top1_next_action_group"].isin(selected_actions)) &
+    (filtered_df["Top1_confidence"] >= conf_threshold)
+]
+st.session_state.filtered_prediction_data = filtered_df
+
+# 下載區塊
+today_str = datetime.now().strftime("%Y%m%d")
+default_filename = f"prediction_result_{len(filtered_df)}users_{today_str}"
+custom_filename = st.text_input(
+    "自訂檔名（選填，系統會自動加上 .csv）",
+    value=default_filename,
+    placeholder="ex: 旅平險_Top3_信心0.3"
+)
+
+if st.button("確認條件並準備下載"):
+    filename = f"{custom_filename}.csv"
+    st.download_button("📥 下載結果 CSV", filtered_df.to_csv(index=False), file_name=filename, mime="text/csv")
+
