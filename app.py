@@ -47,7 +47,7 @@ class SequencePreprocessor:
 # ✅ 初始化 preprocessor（從前面 .pkl 拆出邏輯）
 # 載入包含 encoder、scaler、transform 方法的完整前處理器
 preprocessor = joblib.load("sequence_preprocessor.pkl")
-log.append("✅ 前處理器載入成功")
+    log.append("✅ 前處理器載入成功")
     return model, preprocessor, log
 
 # ========== 前處理函式 ==========
@@ -90,8 +90,8 @@ uploaded_file = st.file_uploader("請上傳用戶行為資料 (CSV 檔)", type=[
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    st.session_state.raw_uploaded_data = df
-        required_columns = ["user_pseudo_id", "event_time", "action", "action_group", "source", "medium", "platform", "staytime", "has_shared", "revisit_count"]
+        st.session_state.raw_uploaded_data = df
+    required_columns = ["user_pseudo_id", "event_time", "action", "action_group", "source", "medium", "platform", "staytime", "has_shared", "revisit_count"]
     missing_cols = validate_columns(df, required_columns)
     if missing_cols:
         st.error(f"❌ 缺少必要欄位：{', '.join(missing_cols)}")
