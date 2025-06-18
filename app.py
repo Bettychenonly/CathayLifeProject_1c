@@ -38,27 +38,18 @@ def load_model_and_preprocessor():
         log.append(f"❌ 模型載入失敗: {str(e)}")
         return None, None, log
 
-    # 方法1: 使用 joblib 載入預處理器
-    if os.path.exists("sequence_preprocessor.pkl"):
-        try:
-            preprocessor = joblib.load("sequence_preprocessor.pkl")
-            log.append("✅ 前處理器載入成功")
-            return model, preprocessor, log
-        except Exception as e:
-            log.append(f"❌ 前處理器載入失敗: {str(e)}")
-    
-    # 方法2: 如果 pkl 檔案不存在，使用內建類別
-    log.append("⚠️ 使用內建前處理器類別")
-    
+    # 定義 SequencePreprocessor 類別（必須在載入 pkl 之前定義）
     class SequencePreprocessor:
-        def __init__(self, cat_features, num_features, seq_len=10):
-            self.cat_features = cat_features
-            self.num_features = num_features
+        def __init__(self, cat_features=None, num_features=None, seq_len=10):
+            self.cat_features = cat_features or ['action', 'action_group', 'source', 'medium', 'platform']
+            self.num_features = num_features or ['staytime', 'revisit_count']
             self.seq_len = seq_len
             self.ordinal_encoder = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
             self.scaler = StandardScaler()
             self.num_categories = {}
             self.is_fitted = False
+            # 可能存在的其他屬性
+            self.label_encoder_action_group = None
 
         def fit(self, df):
             """訓練編碼器和標準化器"""
@@ -97,6 +88,34 @@ def load_model_and_preprocessor():
             """訓練並轉換資料"""
             return self.fit(df).transform(df)
 
+    # 嘗試載入 pkl 檔案
+    if os.path.exists("sequence_preprocessor.pkl"):
+        try:
+            # 先將 SequencePreprocessor 加入到全域命名空間，讓 pickle 能找到
+            import sys
+            current_module = sys.modules[__name__]
+            setattr(current_module, 'SequencePreprocessor', SequencePreprocessor)
+            
+            preprocessor = joblib.load("sequence_preprocessor.pkl")
+            log.append("✅ 前處理器載入成功")
+            
+            # 檢查載入的前處理器是否有必要的屬性
+            if not hasattr(preprocessor, 'is_fitted'):
+                preprocessor.is_fitted = True  # 假設已經訓練過
+            if not hasattr(preprocessor, 'cat_features'):
+                preprocessor.cat_features = ['action', 'action_group', 'source', 'medium', 'platform']
+            if not hasattr(preprocessor, 'num_features'):
+                preprocessor.num_features = ['staytime', 'revisit_count']
+                
+            return model, preprocessor, log
+            
+        except Exception as e:
+            log.append(f"❌ 前處理器載入失敗: {str(e)}")
+            log.append("⚠️ 將使用內建前處理器類別")
+    
+    # 如果 pkl 檔案不存在或載入失敗，使用內建類別
+    log.append("⚠️ 使用內建前處理器類別")
+    
     # 初始化預設的前處理器
     cat_features = ['action', 'action_group', 'source', 'medium', 'platform']
     num_features = ['staytime', 'revisit_count']
@@ -518,7 +537,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
 
