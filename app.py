@@ -141,50 +141,149 @@ def preprocess_and_predict(df, model, preprocessor):
             st.warning("轉換後的資料包含空值，正在處理...")
             X = X.fillna(0)
         
-        # 進行預測
-        st.info("正在進行模型預測...")
-        y_pred = model.predict(X)
+        st.info("正在準備模型輸入格式...")
+        
+        # 準備模型輸入 - 只選擇模型需要的特徵
+        model_features = ['action', 'action_group', 'source', 'medium', 'platform', 'staytime', 'revisit_count']
+        X_model = X[model_features].copy()
+        
+        # 確保所有數據都是數值型
+        for col in X_model.columns:
+            X_model[col] = pd.to_numeric(X_model[col], errors='coerce')
+        
+        # 處理任何剩餘的 NaN 值
+        X_model = X_model.fillna(0)
+        
+        # 轉換為 numpy array 並確保正確的資料類型
+        X_array = X_model.values.astype(np.float32)
+        
+        st.info(f"模型輸入形狀: {X_array.shape}")
+        st.info(f"模型輸入資料類型: {X_array.dtype}")
+        
+        # 檢查是否有序列模型需求
+        try:
+            # 嘗試直接預測
+            st.info("正在進行模型預測...")
+            y_pred = model.predict(X_array)
+            
+        except Exception as pred_error:
+            st.warning(f"直接預測失敗: {pred_error}")
+            st.info("嘗試序列格式...")
+            
+            # 如果是序列模型，需要重塑資料
+            # 假設每個用戶有一個序列，序列長度為 10
+            seq_len = 10
+            n_features = X_array.shape[1]
+            
+            # 將資料重塑為序列格式
+            if len(X_array) >= seq_len:
+                # 創建滑動窗口序列
+                sequences = []
+                for i in range(len(X_array) - seq_len + 1):
+                    sequences.append(X_array[i:i+seq_len])
+                X_seq = np.array(sequences).astype(np.float32)
+                st.info(f"序列輸入形狀: {X_seq.shape}")
+                y_pred = model.predict(X_seq)
+            else:
+                # 如果資料太少，用零填充
+                X_padded = np.zeros((1, seq_len, n_features), dtype=np.float32)
+                X_padded[0, :len(X_array)] = X_array
+                st.info(f"填充後輸入形狀: {X_padded.shape}")
+                y_pred = model.predict(X_padded)
         
         # 檢查預測結果的格式
+        st.info(f"預測輸出類型: {type(y_pred)}")
+        if isinstance(y_pred, (list, tuple)):
+            st.info(f"預測輸出數量: {len(y_pred)}")
+            for i, pred in enumerate(y_pred):
+                st.info(f"輸出 {i} 形狀: {pred.shape}")
+        else:
+            st.info(f"預測輸出形狀: {y_pred.shape}")
+        
+        # 處理不同的輸出格式
         if not isinstance(y_pred, (list, tuple)):
             # 如果只有一個輸出，包裝成列表
             y_pred = [y_pred]
         
-        # 處理不同的輸出格式
+        # 處理序列預測結果 - 取最後一個時間步
+        processed_pred = []
+        for pred in y_pred:
+            if len(pred.shape) == 3:  # (batch, time, features)
+                # 取最後一個時間步
+                processed_pred.append(pred[:, -1, :])
+            elif len(pred.shape) == 2:  # (batch, features)
+                processed_pred.append(pred)
+            else:  # (batch,)
+                processed_pred.append(pred.reshape(-1, 1))
+        
+        y_pred = processed_pred
+        
+        # 確保預測結果與原始資料長度匹配
+        original_length = len(df)
+        
         if len(y_pred) >= 1:
             # 行為預測
-            if len(y_pred[0].shape) > 1:
-                y_pred_action = np.argmax(y_pred[0], axis=1)
-                y_pred_action_conf = np.max(y_pred[0], axis=1)
+            pred_0 = y_pred[0]
+            if len(pred_0.shape) > 1 and pred_0.shape[1] > 1:
+                y_pred_action = np.argmax(pred_0, axis=1)
+                y_pred_action_conf = np.max(pred_0, axis=1)
             else:
-                y_pred_action = y_pred[0].flatten()
+                y_pred_action = pred_0.flatten()
                 y_pred_action_conf = np.ones_like(y_pred_action) * 0.5
+            
+            # 調整長度以匹配原始資料
+            if len(y_pred_action) != original_length:
+                if len(y_pred_action) > original_length:
+                    y_pred_action = y_pred_action[:original_length]
+                    y_pred_action_conf = y_pred_action_conf[:original_length]
+                else:
+                    # 用最後一個值填充
+                    last_action = y_pred_action[-1] if len(y_pred_action) > 0 else 0
+                    last_conf = y_pred_action_conf[-1] if len(y_pred_action_conf) > 0 else 0.5
+                    y_pred_action = np.pad(y_pred_action, (0, original_length - len(y_pred_action)), 
+                                         constant_values=last_action)
+                    y_pred_action_conf = np.pad(y_pred_action_conf, (0, original_length - len(y_pred_action_conf)), 
+                                              constant_values=last_conf)
         else:
             raise ValueError("模型預測結果格式不正確")
         
         # 處理轉換機率（如果有的話）
         if len(y_pred) >= 2:
             y_pred_online = y_pred[1].flatten()
+            if len(y_pred_online) != original_length:
+                if len(y_pred_online) > original_length:
+                    y_pred_online = y_pred_online[:original_length]
+                else:
+                    last_val = y_pred_online[-1] if len(y_pred_online) > 0 else 0.1
+                    y_pred_online = np.pad(y_pred_online, (0, original_length - len(y_pred_online)), 
+                                         constant_values=last_val)
         else:
-            y_pred_online = np.random.rand(len(df)) * 0.3  # 預設值
+            y_pred_online = np.random.rand(original_length) * 0.3  # 預設值
             
         if len(y_pred) >= 3:
             y_pred_o2o = y_pred[2].flatten()
+            if len(y_pred_o2o) != original_length:
+                if len(y_pred_o2o) > original_length:
+                    y_pred_o2o = y_pred_o2o[:original_length]
+                else:
+                    last_val = y_pred_o2o[-1] if len(y_pred_o2o) > 0 else 0.1
+                    y_pred_o2o = np.pad(y_pred_o2o, (0, original_length - len(y_pred_o2o)), 
+                                      constant_values=last_val)
         else:
-            y_pred_o2o = np.random.rand(len(df)) * 0.3  # 預設值
+            y_pred_o2o = np.random.rand(original_length) * 0.3  # 預設值
         
         # 解碼預測標籤
         if hasattr(preprocessor, 'label_encoder_action_group'):
             try:
                 label_encoder = preprocessor.label_encoder_action_group
-                pred_action_labels = label_encoder.inverse_transform(y_pred_action)
+                pred_action_labels = label_encoder.inverse_transform(y_pred_action.astype(int))
             except:
                 pred_action_labels = [f"Action_{i}" for i in y_pred_action]
         else:
             # 創建簡單的標籤映射
             unique_actions = df['action_group'].unique()
             action_map = {i: action for i, action in enumerate(unique_actions)}
-            pred_action_labels = [action_map.get(i, f"Action_{i}") for i in y_pred_action]
+            pred_action_labels = [action_map.get(int(i) % len(unique_actions), f"Action_{i}") for i in y_pred_action]
         
         # 建立結果資料框
         df_result = df.copy()
@@ -193,6 +292,7 @@ def preprocess_and_predict(df, model, preprocessor):
         df_result["online_conversion_prob"] = y_pred_online
         df_result["o2o_conversion_prob"] = y_pred_o2o
         
+        st.success("✅ 預測完成")
         return df_result
         
     except Exception as e:
@@ -208,6 +308,10 @@ def preprocess_and_predict(df, model, preprocessor):
                 st.write("類別特徵:", preprocessor.cat_features)
             if hasattr(preprocessor, 'num_features'):
                 st.write("數值特徵:", preprocessor.num_features)
+            
+            # 顯示資料樣本
+            st.write("資料樣本:")
+            st.dataframe(df.head(3))
         
         return None
 
